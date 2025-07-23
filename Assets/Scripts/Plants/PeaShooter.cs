@@ -63,11 +63,15 @@ public class Peashooter : Plant
 
     private bool HasZombieInFront()
     {
+        // 获取当前植物的行号（通过排序顺序）
+        SpriteRenderer myRenderer = GetComponent<SpriteRenderer>();
+        int myOrder = myRenderer.sortingOrder;
+
         GameObject[] zombies = GameObject.FindGameObjectsWithTag("Zombie");
         foreach (var z in zombies)
         {
-            // 检查是否在同一行
-            if (Mathf.Abs(z.transform.position.y - transform.position.y) < 0.8f)
+            SpriteRenderer zRenderer = z.GetComponent<SpriteRenderer>();
+            if (zRenderer != null && zRenderer.sortingOrder == myOrder)
             {
                 // 检查是否在豌豆射手前方（右侧）
                 if (z.transform.position.x > transform.position.x)
@@ -76,6 +80,7 @@ public class Peashooter : Plant
         }
         return false;
     }
+
 
 
 

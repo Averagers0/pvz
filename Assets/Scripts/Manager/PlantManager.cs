@@ -1,63 +1,74 @@
-using System;
 using System.Collections;
 using UnityEngine;
-using UnityEngine.UI;
+using UnityEngine.EventSystems;
 
 public class PlantManager : MonoBehaviour
 {
     public static PlantManager Instance;
 
-    [Header("Shovel UI")]
-    public GameObject shovelCursor; // 铲子图片 UI
-    private bool isRemoving = false;
+    [Header("Grid Settings")]
+    public int rows = 5;
+    public int cols = 9;
 
+    // 每个格子的植物对象引用
+    private Plant[,] plantsGrid;
+
+    // 每个格子的中心世界坐标
+    private Vector3[,] gridPositions;
+
+    // 行父物体（行下有9个格子）
+    public GameObject[] rowObjects; // Inspector中赋值，长度为5
+
+    [Header("Shovel UI")]
+    public GameObject shovelCursor; // 铲子图片UI
     public Texture2D shovelTexture;
+
+    private bool isRemoving = false;
 
     private void Awake()
     {
-        Instance = this;
+        if (Instance == null) Instance = this;
+        else Destroy(gameObject);
+
+        plantsGrid = new Plant[rows, cols];
+        gridPositions = new Vector3[rows, cols];
+
+        InitGridPositions();
     }
 
+    // 初始化格子中心点坐标
+    private void InitGridPositions()
+    {
+        for (int r = 0; r < rows; r++)
+        {
+            Transform rowTransform = rowObjects[r].transform;
+            for (int c = 0; c < cols; c++)
+            {
+                Transform cell = rowTransform.GetChild(c);
+                gridPositions[r, c] = cell.position;
+            }
+        }
+    }
 
     private void Update()
     {
         if (isRemoving)
         {
-            // 让铲子 UI 跟随鼠标（如有UI跟随逻辑可写在这里）
-            Vector3 mousePos = Input.mousePosition;
 
-            // 点击左键尝试铲除植物
+            // 左键点击铲除植物
             if (Input.GetMouseButtonDown(0))
             {
-                if (UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject()) return;
+                if (EventSystem.current.IsPointerOverGameObject()) return;
 
-                // 将鼠标位置从屏幕坐标转为世界坐标
-                Vector3 worldPos = Camera.main.ScreenToWorldPoint(mousePos);
-                Vector2 worldPos2D = new Vector2(worldPos.x, worldPos.y);
-
-                // 2D 射线检测（点射线）
-                RaycastHit2D hit = Physics2D.Raycast(worldPos2D, Vector2.zero);
-
-                if (hit.collider != null)
+                Plant plant = GetPlantUnderMouse();
+                if (plant != null)
                 {
-                    Debug.Log($"射线击中物体：{hit.collider.name}");
-                    Plant plant = hit.collider.GetComponent<Plant>();
-                    Debug.Log("GetComponent Plant: " + plant);
-
-                    if (plant != null)
-                    {
-                        Debug.Log($"铲除植物：{plant.name}");
-                        Destroy(plant.gameObject);
-                        DeactivateShovelMode();
-                    }
-                    else
-                    {
-                        Debug.Log("未找到Plant组件");
-                    }
+                    RemovePlant(plant);
+                    DeactivateShovelMode();
                 }
             }
 
-            // 右键退出模式
+            // 右键退出铲除模式
             if (Input.GetMouseButtonDown(1))
             {
                 DeactivateShovelMode();
@@ -65,7 +76,22 @@ public class PlantManager : MonoBehaviour
         }
     }
 
+    // 检测鼠标下的植物
+    private Plant GetPlantUnderMouse()
+    {
+        Vector3 mouseWorldPos = Camera.main.ScreenToWorldPoint(Input.mousePosition);
+        Vector2 worldPos2D = new Vector2(mouseWorldPos.x, mouseWorldPos.y);
 
+        RaycastHit2D hit = Physics2D.Raycast(worldPos2D, Vector2.zero);
+        if (hit.collider != null)
+        {
+            Plant plant = hit.collider.GetComponent<Plant>();
+            return plant;
+        }
+        return null;
+    }
+
+    // 选择植物后调用，等待玩家点击格子种植
     public void SelectPlant(PlantData plantData)
     {
         StartCoroutine(WaitForPlacement(plantData));
@@ -80,32 +106,126 @@ public class PlantManager : MonoBehaviour
         {
             if (Input.GetMouseButtonDown(0))
             {
-                Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
-                if (Physics.Raycast(ray, out RaycastHit hit))
+                if (EventSystem.current.IsPointerOverGameObject()) yield return null;
+
+                if (GetGridIndexFromMouse(out int row, out int col))
                 {
-                    Vector3 position = hit.collider.bounds.center;
-                    Debug.Log($"格子中心位置：{position}");
-                    PlacePlant(plantData, position);
-                    placed = true;
+                    bool success = PlantAt(plantData, row, col);
+                    if (success)
+                    {
+                        Debug.Log($"成功种植植物在位置：{row},{col}");
+                        placed = true;
+                    }
+                    else
+                    {
+                        Debug.Log("该格子已被占用，无法种植");
+                    }
                 }
             }
             yield return null;
         }
     }
 
-    private void PlacePlant(PlantData plantData, Vector3 position)
+    // 在指定格子种植植物
+    public bool PlantAt(PlantData plantData, int row, int col)
     {
-        GameObject newPlant = Instantiate(plantData.prefab, position, Quaternion.identity);
-        Plant plantComponent = newPlant.GetComponent<Plant>();
-        plantComponent.plantData = plantData;
-        plantComponent.OnPlant();
-        plantComponent.SpecialAbility();
+        if (!IsValidGrid(row, col)) return false;
+        if (plantsGrid[row, col] != null) return false;
+
+        Vector3 pos = gridPositions[row, col];
+        GameObject newPlantObj = Instantiate(plantData.prefab, pos, Quaternion.identity);
+        Plant newPlant = newPlantObj.GetComponent<Plant>();
+
+        if (newPlant == null)
+        {
+            Debug.LogError("植物预制体没有 Plant 脚本");
+            Destroy(newPlantObj);
+            return false;
+        }
+
+        SetPlantSortingOrder(newPlant, row);
+        newPlant.plantData = plantData;
+        newPlant.OnPlant();
+        newPlant.SpecialAbility();
+
+        plantsGrid[row, col] = newPlant;
+        return true;
+    }
+
+    private void SetPlantSortingOrder(Plant plant, int row)
+    {
+        SpriteRenderer sr = plant.GetComponent<SpriteRenderer>();
+        if (sr != null)
+        {
+            sr.sortingOrder = row;
+        }
+    }
+
+
+    // 铲除指定植物
+    private void RemovePlant(Plant plant)
+    {
+        for (int r = 0; r < rows; r++)
+        {
+            for (int c = 0; c < cols; c++)
+            {
+                if (plantsGrid[r, c] == plant)
+                {
+                    Destroy(plantsGrid[r, c].gameObject);
+                    plantsGrid[r, c] = null;
+                    Debug.Log($"植物已从 {r},{c} 铲除");
+                    return;
+                }
+            }
+        }
+        Debug.LogWarning("未在网格中找到植物对象");
+    }
+
+    // 判断行列是否有效
+    private bool IsValidGrid(int row, int col)
+    {
+        return row >= 0 && row < rows && col >= 0 && col < cols;
+    }
+
+    // 通过鼠标坐标射线检测获得格子索引
+    public bool GetGridIndexFromMouse(out int row, out int col)
+    {
+        row = -1;
+        col = -1;
+
+        Vector3 mousePos = Input.mousePosition;
+        Vector3 worldPos = Camera.main.ScreenToWorldPoint(mousePos);
+
+        RaycastHit2D hit = Physics2D.Raycast(worldPos, Vector2.zero);
+
+        if (hit.collider != null)
+        {
+            GameObject hitObj = hit.collider.gameObject;
+
+            // 遍历行列，找到匹配的格子物体
+            for (int r = 0; r < rows; r++)
+            {
+                Transform rowTransform = rowObjects[r].transform;
+                for (int c = 0; c < cols; c++)
+                {
+                    if (rowTransform.GetChild(c).gameObject == hitObj)
+                    {
+                        row = r;
+                        col = c;
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     public void ActivateShovelMode()
     {
         isRemoving = true;
         Cursor.SetCursor(shovelTexture, Vector2.zero, CursorMode.Auto);
+        shovelCursor.SetActive(false);
         Debug.Log("进入铲除模式");
     }
 
@@ -113,6 +233,10 @@ public class PlantManager : MonoBehaviour
     {
         isRemoving = false;
         Cursor.SetCursor(null, Vector2.zero, CursorMode.Auto);
+        shovelCursor.SetActive(true);
         Debug.Log("退出铲除模式");
     }
 }
+
+
+

@@ -117,8 +117,11 @@ public class NormalZombie : Zombie
     // 判断是否同一行
     private bool IsSameRow(Plant plant)
     {
-        float Y = transform.position.y;
-        float TY = plant.transform.position.y;
-        return (Y - TY < sameRowTolerance) && (Y - TY > 0);
+        SpriteRenderer myRenderer = GetComponent<SpriteRenderer>();
+        SpriteRenderer plantRenderer = plant.GetComponent<SpriteRenderer>();
+
+        return plantRenderer != null &&
+               myRenderer.sortingOrder == plantRenderer.sortingOrder;
     }
+
 }

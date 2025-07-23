@@ -50,10 +50,14 @@ public class ZombieManager : MonoBehaviour
         }
 
         // 随机选一个僵尸和出生点
+
         ZombieData randomZombie = zombieTypes[Random.Range(0, zombieTypes.Length)];
-        Transform spawnPoint = spawnPoints[Random.Range(0, spawnPoints.Length)];
+        int indexRow = Random.Range(0, spawnPoints.Length);
+        Transform spawnPoint = spawnPoints[indexRow];
 
         GameObject zombieObj = Instantiate(randomZombie.prefab, spawnPoint.position, Quaternion.identity);
+        SpriteRenderer sr = zombieObj.GetComponent<SpriteRenderer>();
+        sr.sortingOrder = indexRow;
         Zombie zombie = zombieObj.GetComponent<Zombie>();
         if (zombie != null)
         {
